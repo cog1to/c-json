@@ -17,6 +17,8 @@ enum json_state {
   MIDDLE = 1,
   EXPONENT = 3,
   FRACTION = 4,
+  INSTRING = 5,
+  ESCAPE = 6,
   END = 2
 };
 
@@ -123,7 +125,7 @@ int json_parse_float(const char *input, int *offset, void *target) {
   }
 
   if (error == 0) {
-    buffer[buffer_offset+1] = '\0';
+    buffer[buffer_offset] = '\0';
     double *t_double = target;
     *t_double = strtod(buffer, NULL);
 
@@ -135,6 +137,62 @@ int json_parse_float(const char *input, int *offset, void *target) {
   return error;
 }
 
+int json_parse_string(const char *input, int *offset, void *target) {
+  int length = strlen(input) - (*offset);
+  if (length <= 0) {
+    return OUT_OF_BOUNDS;
+  }
+
+  char *buffer = calloc(strlen(input), sizeof(char));
+  int state = INIT, error = 0;
+
+  int index = *offset, buffer_offset = 0;
+  while (index < strlen(input) && error == 0 && state != END) {
+    char symbol = input[index];
+    switch (state) {
+    case INIT:
+      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+        // Skip whitespace symbols.
+      } else if (symbol == '"') {
+        state = INSTRING;
+      } else {
+        error = BAD_FORMAT;
+      }
+      break;
+    case INSTRING:
+      if (symbol == '\\') {
+        state = ESCAPE;
+      } else if (symbol != '"') {
+        buffer[buffer_offset] = symbol;
+        buffer_offset += 1;
+      } else {
+        state = END;
+      }
+      break;
+    case ESCAPE:
+      buffer[buffer_offset] = symbol;
+      buffer_offset += 1;
+      state = INSTRING;
+      break;
+    }
+    index += 1;
+  }
+
+  if (state != END) {
+    error = BAD_FORMAT;
+  }
+
+  if (error == 0) {
+    buffer[buffer_offset] = '\0';
+    char **string_t = target;
+    *string_t = buffer;
+
+    // Advance the offset to the last unparsed symbol.
+    *offset += buffer_offset;
+  }
+
+  return error;
+}
 /* API */
 
 int json_parse(const char *input, void *target, json_descriptor_t descriptor) {
@@ -143,6 +201,12 @@ int json_parse(const char *input, void *target, json_descriptor_t descriptor) {
   switch (descriptor.type) {
   case INT:
     error = json_parse_int(input, &offset, target);
+    break;
+  case FLOAT:
+    error = json_parse_float(input, &offset, target);
+    break;
+  case STRING:
+    error = json_parse_string(input, &offset, target);
     break;
   default:
     return NOT_SUPPORTED;
@@ -153,11 +217,11 @@ int json_parse(const char *input, void *target, json_descriptor_t descriptor) {
 /* Test */
 
 int main(int argc, char **argv) {
-  const char *input = "   -12399\n";
-  int result = 0;
+  const char *input = "  -12399.45";
+  double result = 0;
 
   json_descriptor_t desc = {
-    .type = INT
+    .type = FLOAT
   };
 
   int error = json_parse(input, &result, desc);
@@ -165,7 +229,7 @@ int main(int argc, char **argv) {
   if (error != 0) {
     printf("Parsing error: %d\n", error);
   } else {
-    printf("Parsing result: %d\n", result);
+    printf("Parsing result: %f\n", result);
   }
 
   return 0;
