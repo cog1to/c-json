@@ -15,26 +15,22 @@ enum json_type_t {
 };
 
 typedef void *(*accessor_t)(void *);
-typedef void *(*allocator_t)(void *);
+typedef void *(*allocator_t)();
 
 typedef struct {
   int type;
-  accessor_t accessor;
   void *descriptor;
 } json_descriptor_t;
 
 typedef struct {
-  int element_type;
-  void *descriptor;
-} json_array_descriptor_t;
-
-typedef struct {
   char *name;
   json_descriptor_t *descriptor;
+  accessor_t accessor;
 } json_property_descriptor_t;
 
 typedef struct {
   allocator_t allocator;
+  size_t size;
   int num_props;
   json_property_descriptor_t *props;
 } json_object_descriptor_t;
