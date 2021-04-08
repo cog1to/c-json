@@ -24,7 +24,7 @@ typedef struct {
 
 typedef struct {
   char *name;
-  json_descriptor_t *descriptor;
+  json_descriptor_t descriptor;
   accessor_t accessor;
 } json_property_descriptor_t;
 

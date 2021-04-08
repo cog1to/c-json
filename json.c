@@ -9,7 +9,9 @@
 enum json_parse_error {
   NOT_SUPPORTED = 1,
   OUT_OF_BOUNDS = 2,
-  BAD_FORMAT = 3
+  BAD_FORMAT = 3,
+  BAD_SPEC = 4,
+  PROP_NOT_FOUND = 5
 };
 
 /* Int */
@@ -24,6 +26,11 @@ enum json_state {
   ESCAPE = 6,
   ARRAY_NEXT = 8,
   ARRAY_VALUE = 9,
+  OBJECT_PROP_DELIM = 10,
+  OBJECT_PROP_VALUE = 11,
+  OBJECT_NEXT = 13,
+  OBJECT_PROP_NAME = 14,
+  OBJECT_PROP_NEXT = 15,
   END = 2
 };
 
@@ -37,6 +44,7 @@ int json_parse_value(const char *input, int *offset, void *target, json_descript
 int json_element_size(json_descriptor_t desc);
 void *json_array_element_alloc(json_descriptor_t desc);
 int json_parse_array(const char *input, int *offset, void *target, json_descriptor_t desc);
+int json_parse_object(const char *input, int *offset, void *target, json_descriptor_t desc);
 
 /* Implementation */
 
@@ -202,6 +210,7 @@ int json_parse_string(const char *input, int *offset, void *target) {
         buffer_offset += 1;
         index += 1;
       } else {
+        index += 1;
         state = END;
       }
       break;
@@ -308,6 +317,9 @@ int json_parse_value(const char *input, int *offset, void *target, json_descript
   case ARRAY:
     error = json_parse_array(input, offset, target, descriptor);
     break;
+  case OBJECT:
+    error = json_parse_object(input, offset, target, descriptor);
+    break;
   default:
     return NOT_SUPPORTED;
   }
@@ -346,7 +358,7 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
   json_descriptor_t *element_desc = desc.descriptor;
   if (element_desc == NULL) {
     return BAD_FORMAT;
-  } 
+  }
 
   int state = INIT, error = 0, index = *offset;
   linked_list_t *list = linked_list_new();
@@ -411,7 +423,131 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
 
     *offset = index;
   } else if (error != 0) {
-    free(list);
+    linked_list_free(list);
+  }
+
+  return error;
+}
+
+json_property_descriptor_t *json_object_get_property(json_object_descriptor_t desc, const char *name) {
+  for (int idx = 0; idx < desc.num_props; idx++) {
+    json_property_descriptor_t prop = desc.props[idx];
+    if (strcmp(prop.name, name) == 0) {
+      return &desc.props[idx];
+    }
+  }
+  return NULL;
+}
+
+int json_parse_object(const char *input, int *offset, void *target, json_descriptor_t desc) {
+  int length = strlen(input) - (*offset);
+  if (length <= 0) {
+    return OUT_OF_BOUNDS;
+  }
+
+  json_object_descriptor_t *obj_desc = desc.descriptor;
+  if (obj_desc == NULL) {
+    return BAD_SPEC;
+  }
+
+  int state = INIT, error = 0, index = *offset;
+  char *prop_name = NULL;
+  json_property_descriptor_t *prop;
+
+  printf("parsing object...\n");
+
+  while (index < strlen(input) && error == 0 && state != END) {
+    char symbol = input[index];
+    printf("  symbol: '%c'\n", symbol);
+
+    switch (state) {
+    case INIT:
+      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+        // Skip whitespace symbols.
+      } else if (symbol == '{') {
+        printf("going from INIT to OBJECT_NEXT\n");
+        state = OBJECT_NEXT;
+      } else {
+        printf("going from INIT to BAD_FORMAT\n");
+        error = BAD_FORMAT;
+      }
+      index += 1;
+      break;
+    case OBJECT_PROP_NAME:
+      printf("parsing name\n");
+      error = json_parse_string(input, &index, &prop_name);
+
+      if (error == 0) {
+        printf("parsed name\n");
+        prop = json_object_get_property(*obj_desc, prop_name);
+        if (prop == NULL) {
+          printf("prop %s not found\n");
+          error = PROP_NOT_FOUND;
+        } else {
+          printf("going to DELIM from PROP_NAME\n");
+          state = OBJECT_PROP_DELIM;
+        }
+      }
+      break;
+    case OBJECT_PROP_DELIM:
+      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+        // Skip whitespace symbols.
+        index += 1;
+      } else if (symbol == ':') {
+        printf("going from OBJECT_DELIM to VALUE\n");
+        state = OBJECT_PROP_VALUE;
+        index += 1;
+      } else {
+        error = BAD_FORMAT;
+      }
+      break;
+    case OBJECT_PROP_VALUE:
+      error = json_parse_value(input, &index, prop->accessor(target), prop->descriptor);
+      if (error != 0) {
+        printf("failed to parse prop value\n");
+      }
+
+      free(prop_name);
+      prop_name = NULL;
+
+      printf("going to PROP_NEXT\n");
+      state = OBJECT_PROP_NEXT;
+      break;
+    case OBJECT_PROP_NEXT:
+      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+        // Skip whitespace symbols.
+        index += 1;
+      } else if (symbol == ',') {
+        state = OBJECT_NEXT;
+        index += 1;
+      } else if (symbol == '}') {
+        state = END;
+        index += 1;
+      } else {
+        error = BAD_FORMAT;
+      }
+    case OBJECT_NEXT:
+      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+        index += 1;
+        // Skip whitespace symbols.
+      } else if (symbol == '}') {
+        index += 1;
+        state = END;
+      } else if (symbol == '"') {
+        state = OBJECT_PROP_NAME;
+      } else {
+        error = BAD_FORMAT;
+      }
+      break;
+    }
+  }
+
+  if (prop_name != NULL) {
+    free(prop_name);
+  }
+
+  if (error == 0) {
+    *offset = index;
   }
 
   return error;
@@ -429,44 +565,61 @@ int json_parse(const char *input, void *target, json_descriptor_t descriptor) {
 /* Test */
 
 typedef struct {
-  size_t size;
-  double *items;
-} double_list_t;
+  int value;
+} intobject;
 
 typedef struct {
-  size_t size;
-  double_list_t *items;
-} double_list_list_t;
+  intobject value;
+} myobject;
+
+void *myobj_value(myobject *obj) {
+  return &(obj->value);
+}
+
+void *intobj_value(intobject *obj) {
+  return &(obj->value);
+}
+
+#define TO_GENERIC_ACCESSOR(func) (void *(*)(void *))func
 
 int main(int argc, char **argv) {
-  const char *input = "[[ .54, 1.23, -6.5], [2, 3, 4.0]]";
-  double_list_list_t output; 
+  const char *input = "{\"value\": {\"value\": 12}}";
+  myobject output;
 
   json_descriptor_t desc = {
-    .type = ARRAY,
-    .descriptor = &(json_descriptor_t) {
-      .type = ARRAY,
-      .descriptor = &(json_descriptor_t) {
-        .type = FLOAT
+    .type = OBJECT,
+    .descriptor = &(json_object_descriptor_t){
+      .num_props = 1,
+      .props = (json_property_descriptor_t[]){
+        {
+          .name = "value",
+          .descriptor = {
+            .type = OBJECT,
+            .descriptor = &(json_object_descriptor_t){
+              .num_props = 1,
+              .props = (json_property_descriptor_t[]){
+                {
+                  .name = "value",
+                  .descriptor = {
+                    .type = INT
+                  },
+                  .accessor = TO_GENERIC_ACCESSOR(intobj_value)
+                }
+              }
+            }
+          },
+          .accessor = TO_GENERIC_ACCESSOR(myobj_value)
+        }
       }
     }
   };
 
   int error = json_parse(input, &output, desc);
-
   if (error != 0) {
     printf("Parsing error: %d\n", error);
   } else {
-    printf("[");
-    for (int idx = 0; idx < output.size; idx++) {
-      double_list_t lst = output.items[idx];
-      printf("[");
-      for (int lidx = 0; lidx < lst.size; lidx++) {
-        printf("%f,", lst.items[lidx]);
-      }
-      printf("]");
-    }
-    printf("]\n");
+    printf("Parsed succesfully: %d\n", output.value.value);
+
   }
 
   return 0;
