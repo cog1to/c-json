@@ -14,7 +14,7 @@ enum json_parse_error {
   PROP_NOT_FOUND = 5
 };
 
-/* Int */
+/* Internal state. */
 
 enum json_state {
   INIT = 0,
