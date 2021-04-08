@@ -36,6 +36,7 @@ enum json_state {
 
 /* Internal API */
 
+int is_whitespace(char symbol);
 int json_parse_int(const char *input, int *offset, void *target);
 int json_parse_float(const char *input, int *offset, void *target);
 int json_parse_string(const char *input, int *offset, void *target);
@@ -47,6 +48,14 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
 int json_parse_object(const char *input, int *offset, void *target, json_descriptor_t desc);
 
 /* Implementation */
+
+int is_whitespace(char symbol) {
+  if (symbol == '\n' || symbol == '\t' || symbol == ' ' || symbol == '\r') {
+    return 1; 
+  } else {
+    return 0;
+  }
+}
 
 int json_parse_int(const char *input, int *offset, void *target) {
   int length = strlen(input) - (*offset);
@@ -63,7 +72,7 @@ int json_parse_int(const char *input, int *offset, void *target) {
 
     switch (state) {
     case INIT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
         index += 1;
       } else if ((symbol >= '0' && symbol <= '9') || symbol == '-') {
@@ -116,7 +125,7 @@ int json_parse_float(const char *input, int *offset, void *target) {
     char symbol = input[index];
     switch (state) {
     case INIT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
         index += 1;
       } else if ((symbol >= '0' && symbol <= '9') || symbol == '-') {
@@ -143,7 +152,7 @@ int json_parse_float(const char *input, int *offset, void *target) {
         buffer_offset += 1;
         state = FRACTION;
         index += 1;
-      } else if (symbol == ',' || symbol == '}' || symbol == '\n' || symbol == '\t' || symbol == ' ' || symbol == ']') {
+      } else if (symbol == ',' || symbol == '}' ||  symbol == ']' || is_whitespace(symbol)) {
         state = END;
       } else {
         error = BAD_FORMAT;
@@ -154,7 +163,7 @@ int json_parse_float(const char *input, int *offset, void *target) {
         buffer[buffer_offset] = symbol;
         buffer_offset += 1;
         index += 1;
-      } else if (symbol == ',' || symbol == '}' || symbol == '\n' || symbol == '\t' || symbol == ' ' || symbol == ']') {
+      } else if (symbol == ',' || symbol == '}' || symbol == ']' || is_whitespace(symbol)) {
         state = END;
       } else {
         error = BAD_FORMAT;
@@ -191,7 +200,7 @@ int json_parse_string(const char *input, int *offset, void *target) {
 
     switch (state) {
     case INIT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
         index += 1;
       } else if (symbol == '"') {
@@ -215,7 +224,15 @@ int json_parse_string(const char *input, int *offset, void *target) {
       }
       break;
     case ESCAPE:
-      buffer[buffer_offset] = symbol;
+      if (symbol == 'n') {
+        buffer[buffer_offset] = '\n';
+      } else if (symbol == 't') {
+        buffer[buffer_offset] = '\t';
+      } else if (symbol == 'r') {
+        buffer[buffer_offset] = '\r';
+      } else {
+        buffer[buffer_offset] = symbol;
+      }
       buffer_offset += 1;
       state = INSTRING;
       index += 1;
@@ -253,7 +270,7 @@ int json_parse_bool(const char *input, int *offset, void *target) {
     char symbol = input[index];
     switch (state) {
     case INIT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
         index += 1;
       } else if ((symbol >= 'a' && symbol <= 'z') || (symbol >= 'A' && symbol <= 'Z')) {
@@ -270,7 +287,7 @@ int json_parse_bool(const char *input, int *offset, void *target) {
         buffer[buffer_offset] = symbol;
         buffer_offset += 1;
         index += 1;
-      } else if (symbol == ',' || symbol == '}' || symbol == '\n' || symbol == '\t' || symbol == ' ' || symbol == ']') {
+      } else if (symbol == ',' || symbol == '}' || symbol == ']' || is_whitespace(symbol)) {
         state = END;
       } else {
         error = BAD_FORMAT;
@@ -369,7 +386,7 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
 
     switch (state) {
     case INIT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
       } else if (symbol == '[') {
         state = ARRAY_VALUE;
@@ -454,47 +471,37 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
   char *prop_name = NULL;
   json_property_descriptor_t *prop;
 
-  printf("parsing object...\n");
-
   while (index < strlen(input) && error == 0 && state != END) {
     char symbol = input[index];
-    printf("  symbol: '%c'\n", symbol);
 
     switch (state) {
     case INIT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
       } else if (symbol == '{') {
-        printf("going from INIT to OBJECT_NEXT\n");
         state = OBJECT_NEXT;
       } else {
-        printf("going from INIT to BAD_FORMAT\n");
         error = BAD_FORMAT;
       }
       index += 1;
       break;
     case OBJECT_PROP_NAME:
-      printf("parsing name\n");
       error = json_parse_string(input, &index, &prop_name);
 
       if (error == 0) {
-        printf("parsed name\n");
         prop = json_object_get_property(*obj_desc, prop_name);
         if (prop == NULL) {
-          printf("prop %s not found\n");
           error = PROP_NOT_FOUND;
         } else {
-          printf("going to DELIM from PROP_NAME\n");
           state = OBJECT_PROP_DELIM;
         }
       }
       break;
     case OBJECT_PROP_DELIM:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
         index += 1;
       } else if (symbol == ':') {
-        printf("going from OBJECT_DELIM to VALUE\n");
         state = OBJECT_PROP_VALUE;
         index += 1;
       } else {
@@ -503,18 +510,14 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
       break;
     case OBJECT_PROP_VALUE:
       error = json_parse_value(input, &index, prop->accessor(target), prop->descriptor);
-      if (error != 0) {
-        printf("failed to parse prop value\n");
-      }
 
       free(prop_name);
       prop_name = NULL;
 
-      printf("going to PROP_NEXT\n");
       state = OBJECT_PROP_NEXT;
       break;
     case OBJECT_PROP_NEXT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         // Skip whitespace symbols.
         index += 1;
       } else if (symbol == ',') {
@@ -527,7 +530,7 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
         error = BAD_FORMAT;
       }
     case OBJECT_NEXT:
-      if (symbol == '\n' || symbol == '\t' || symbol == ' ') {
+      if (is_whitespace(symbol)) {
         index += 1;
         // Skip whitespace symbols.
       } else if (symbol == '}') {
