@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 
 #include "json.h"
 #include "linkedlist.h"
@@ -508,7 +509,7 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
       }
       break;
     case OBJECT_PROP_VALUE:
-      error = json_parse_value(input, &index, prop->accessor(target), prop->descriptor);
+      error = json_parse_value(input, &index, target + prop->offset, prop->descriptor);
 
       free(prop_name);
       prop_name = NULL;
@@ -595,36 +596,6 @@ typedef struct {
   intobject *items;
 } intobj_list;
 
-#define JSON_PROPERTY(pname, desc, asc) { \
-.name = #pname, \
-.descriptor = desc, \
-.accessor = TO_GENERIC_ACCESSOR(asc) \
-}
-
-#define JSON_INT { .type = INT }
-#define JSON_FLOAT { .type = FLOAT }
-#define JSON_STRING { .type = STRING }
-#define JSON_BOOL { .type = BOOL }
-
-#define JSON_ARRAY { \
-.type = ARRAY, \
-.descriptor = &(json_descriptor_t)
-
-#define JSON_ARRAY_END }
-
-#define JSON_OBJECT(alloc, dealloc, osize, num) { \
-.type = OBJECT, \
-.descriptor = &(json_object_descriptor_t){ \
-  .allocator = alloc, \
-  .deallocator = dealloc, \
-  .size = osize, \
-  .num_props = num, \
-  .props = (json_property_descriptor_t[]){
-
-#define JSON_OBJECT_END } \
-} \
-}
-
 int main(int argc, char **argv) {
   const char *input = "[{\"value\": 12, \"sub\": 0},{\"value\": -6, \"sub\": 1},{\"value\": 55, \"sub\": 2},{\"value\": 77, \"sub\": 3},{\"value\": 9, \"sub\": 4}]";
   printf("parsing '%s'\n", input);
@@ -633,8 +604,8 @@ int main(int argc, char **argv) {
   json_descriptor_t desc =
   JSON_ARRAY
     JSON_OBJECT(intobj_alloc, intobj_dealloc, sizeof(intobject), 2)
-      JSON_PROPERTY(value, JSON_INT, intobj_value),
-      JSON_PROPERTY(sub, JSON_INT, intobj_sub)
+      JSON_PROPERTY(value, JSON_INT, offsetof(intobject, value)),
+      JSON_PROPERTY(sub, JSON_INT, offsetof(intobject, sub))
     JSON_OBJECT_END
   JSON_ARRAY_END;
 
