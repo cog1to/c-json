@@ -11,7 +11,8 @@ enum json_type_t {
   STRING = 3,
   BOOL = 4,
   ARRAY = 5,
-  OBJECT = 6
+  OBJECT = 6,
+  UNKNOWN = 7
 };
 
 typedef void *(*allocator_t)();

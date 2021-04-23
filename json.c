@@ -38,17 +38,20 @@ enum json_state {
 /* Internal API */
 
 int is_whitespace(char symbol);
+int is_numeric(char symbol, int allow_minus_sign);
+int is_alpha(char symbol);
 int json_parse_int(const char *input, int *offset, void *target);
 int json_parse_float(const char *input, int *offset, void *target);
 int json_parse_string(const char *input, int *offset, void *target);
 int json_parse_bool(const char *input, int *offset, void *target);
+int json_parse_unknown(const char *input, int *offset);
 int json_parse_value(const char *input, int *offset, void *target, json_descriptor_t descriptor);
 int json_element_size(json_descriptor_t desc);
 void *json_array_element_alloc(json_descriptor_t desc);
 int json_parse_array(const char *input, int *offset, void *target, json_descriptor_t desc);
 int json_parse_object(const char *input, int *offset, void *target, json_descriptor_t desc);
 
-/* Implementation */
+/* Helpers */
 
 int is_whitespace(char symbol) {
   if (symbol == '\n' || symbol == '\t' || symbol == ' ' || symbol == '\r') {
@@ -57,6 +60,16 @@ int is_whitespace(char symbol) {
     return 0;
   }
 }
+
+int is_numeric(char symbol, int allow_minus_sign) {
+  return ((symbol >= '0' && symbol <= '9') || (allow_minus_sign && symbol == '-') || (symbol == '.'));
+}
+
+int is_alpha(char symbol) {
+  return ((symbol >= 'a' && symbol <= 'z') || (symbol >= 'A' && symbol <= 'Z'));
+}
+
+/** JSON implementation */
 
 int json_parse_int(const char *input, int *offset, void *target) {
   int length = strlen(input) - (*offset);
@@ -100,9 +113,11 @@ int json_parse_int(const char *input, int *offset, void *target) {
   }
 
   if (error == 0) {
-    buffer[buffer_offset+1] = '\0';
-    int *t_int = target;
-    *t_int = atoi(buffer);
+    if (target != NULL) {
+      buffer[buffer_offset+1] = '\0';
+      int *t_int = target;
+      *t_int = atoi(buffer);
+    }
 
     // Advance the offset to the last unparsed symbol.
     *offset = index;
@@ -174,9 +189,11 @@ int json_parse_float(const char *input, int *offset, void *target) {
   }
 
   if (error == 0) {
-    buffer[buffer_offset] = '\0';
-    double *t_double = target;
-    *t_double = strtod(buffer, NULL);
+    if (target != NULL) {
+      buffer[buffer_offset] = '\0';
+      double *t_double = target;
+      *t_double = strtod(buffer, NULL);
+    }
 
     // Advance the offset to the last unparsed symbol.
     *offset = index;
@@ -246,9 +263,11 @@ int json_parse_string(const char *input, int *offset, void *target) {
   }
 
   if (error == 0) {
-    buffer[buffer_offset] = '\0';
-    char **string_t = target;
-    *string_t = buffer;
+    if (target != NULL) {
+      buffer[buffer_offset] = '\0';
+      char **string_t = target;
+      *string_t = buffer;
+    }
 
     // Advance the offset to the last unparsed symbol.
     *offset = index;
@@ -301,9 +320,13 @@ int json_parse_bool(const char *input, int *offset, void *target) {
     buffer[buffer_offset] = '\0';
     int *t_bool = target;
     if (strcmp("true", buffer) == 0) {
-      *t_bool = 1;
+      if (target != NULL) {
+        *t_bool = 1;
+      }
     } else if (strcmp("false", buffer) == 0) {
-      *t_bool = 0;
+      if (target != NULL) {
+        *t_bool = 0;
+      }
     } else {
        error = BAD_FORMAT;
     }
@@ -313,6 +336,65 @@ int json_parse_bool(const char *input, int *offset, void *target) {
   }
 
   free(buffer);
+  return error;
+}
+
+int json_parse_unknown(const char *input, int *offset) {
+  int length = strlen(input) - (*offset);
+  if (length <= 0) {
+    return OUT_OF_BOUNDS;
+  }
+
+  char *buffer = calloc(strlen(input), sizeof(char));
+  int state = INIT, error = 0;
+
+  int index = *offset, buffer_offset = 0;
+  while (index < strlen(input) && error == 0 && state != END) {
+    char symbol = input[index];
+
+    switch (state) {
+    case INIT:
+      if (is_whitespace(symbol)) {
+        // Skip whitespace symbols.
+        index += 1;
+      } else if (symbol == '{') {
+        json_descriptor_t desc = {
+          .type = OBJECT,
+          .descriptor = &(json_object_descriptor_t){
+            NULL, NULL, 0, 0, NULL
+          }
+        };
+        error = json_parse_object(input, &index, NULL, desc);
+        state = END;
+      } else if (symbol == '[') {
+        json_descriptor_t desc = {
+          .type = ARRAY,
+          .descriptor = &(json_descriptor_t){
+            .type = UNKNOWN
+          }
+        };
+        error = json_parse_array(input, &index, NULL, desc);
+        state = END;
+      } else if (symbol == '"') {
+        error = json_parse_string(input, &index, NULL);
+        state = END;
+      } else if (is_numeric(symbol, 1)) {
+        error = json_parse_float(input, &index, NULL);
+        state = END;
+      } else if (is_alpha(symbol)) {
+        error = json_parse_bool(input, &index, NULL);
+        state = END;
+      } else {
+        error = BAD_FORMAT;
+      }
+      break;
+    }
+  }
+
+  if (error == 0) {
+    *offset = index;
+  }
+
   return error;
 }
 
@@ -337,6 +419,9 @@ int json_parse_value(const char *input, int *offset, void *target, json_descript
     break;
   case OBJECT:
     error = json_parse_object(input, offset, target, descriptor);
+    break;
+  case UNKNOWN:
+    error = json_parse_unknown(input, offset);
     break;
   default:
     return NOT_SUPPORTED;
@@ -364,6 +449,10 @@ int json_element_size(json_descriptor_t desc) {
 }
 
 void *json_array_element_alloc(json_descriptor_t desc) {
+  if (desc.type == UNKNOWN) {
+    return NULL;
+  }
+
   return calloc(1, json_element_size(desc));
 }
 
@@ -402,7 +491,7 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
       if (error == 0) {
         if (element_desc->type == OBJECT) {
           linked_list_append(list, elem_target, ((json_object_descriptor_t *)element_desc->descriptor)->deallocator);
-        } else {
+        } else if (element_desc->type != UNKNOWN) {
           linked_list_append(list, elem_target, NULL);
         }
         state = ARRAY_NEXT;
@@ -422,7 +511,7 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
   }
 
   int list_size = linked_list_size(list), element_size = json_element_size(*element_desc), arr_ind = 0;
-  if (error == 0 && list_size > 0) {
+  if (error == 0 && list_size > 0 && target != NULL) {
     void *array = calloc(list_size, element_size);
 
     linked_list_node_t *node = list->head, *next = node->next;
@@ -469,7 +558,7 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
 
   int state = INIT, error = 0, index = *offset;
   char *prop_name = NULL;
-  json_property_descriptor_t *prop;
+  json_property_descriptor_t *prop = NULL;
 
   while (index < strlen(input) && error == 0 && state != END) {
     char symbol = input[index];
@@ -490,11 +579,7 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
 
       if (error == 0) {
         prop = json_object_get_property(*obj_desc, prop_name);
-        if (prop == NULL) {
-          error = PROP_NOT_FOUND;
-        } else {
-          state = OBJECT_PROP_DELIM;
-        }
+        state = OBJECT_PROP_DELIM;
       }
       break;
     case OBJECT_PROP_DELIM:
@@ -509,7 +594,11 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
       }
       break;
     case OBJECT_PROP_VALUE:
-      error = json_parse_value(input, &index, target + prop->offset, prop->descriptor);
+      if (prop == NULL) {
+        error = json_parse_unknown(input, &index);
+      } else {
+        error = json_parse_value(input, &index, target + prop->offset, prop->descriptor);
+      }
 
       free(prop_name);
       prop_name = NULL;
@@ -532,8 +621,8 @@ int json_parse_object(const char *input, int *offset, void *target, json_descrip
       break;
     case OBJECT_NEXT:
       if (is_whitespace(symbol)) {
-        index += 1;
         // Skip whitespace symbols.
+        index += 1;
       } else if (symbol == '}') {
         index += 1;
         state = END;
@@ -589,15 +678,19 @@ void intobj_dealloc(void *obj) {
   free(obj);
 }
 
-#define TO_GENERIC_ACCESSOR(func) (void *(*)(void *))func
-
 typedef struct {
   size_t size;
   intobject *items;
 } intobj_list;
 
 int main(int argc, char **argv) {
-  const char *input = "[{\"value\": 12, \"sub\": 0},{\"value\": -6, \"sub\": 1},{\"value\": 55, \"sub\": 2},{\"value\": 77, \"sub\": 3},{\"value\": 9, \"sub\": 4}]";
+  const char *input = 
+"[\n\
+  {\"value\": 12, \"unk\":\"123\", \"sub\": 0},\n\
+  {\"value\": -6, \"sub\": 1, \"unkwown\": 2},\n\
+  {\"bool\": true, \"value\": 55, \"sub\": 2},\n\
+  {\"value\": 77, \"sub\": 3},{\"sub\": 4, \"value\": 89889}\n\
+]";
   printf("parsing '%s'\n", input);
   intobj_list output;
 
