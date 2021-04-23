@@ -526,7 +526,9 @@ int json_parse_array(const char *input, int *offset, void *target, json_descript
     list_t *target_list = target;
     target_list->size = list_size;
     target_list->items = array;
+  }
 
+  if (error == 0) {
     *offset = index;
   }
 
@@ -688,8 +690,8 @@ int main(int argc, char **argv) {
 "[\n\
   {\"value\": 12, \"unk\":\"123\", \"sub\": 0},\n\
   {\"value\": -6, \"sub\": 1, \"unkwown\": 2},\n\
-  {\"bool\": true, \"value\": 55, \"sub\": 2},\n\
-  {\"value\": 77, \"sub\": 3},{\"sub\": 4, \"value\": 89889}\n\
+  {\"bool\": true, \"value\": 55, \"obj\": {\"a\":1, \"b\" : \"c\"}, \"sub\": 2},\n\
+  {\"value\": 77, \"sub\": 3},{\"sub\": 4, \"arr\": [1,2,3,4,5,6], \"value\": 89889}\n\
 ]";
   printf("parsing '%s'\n", input);
   intobj_list output;
